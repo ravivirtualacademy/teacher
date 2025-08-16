@@ -1,0 +1,183 @@
+
+import type { ResearchPaper, PaperSection } from '../types';
+
+const SECTION_TITLES: Record<PaperSection, string> = {
+  title: 'Title',
+  abstract: 'Abstract',
+  introduction: '1. Introduction',
+  literatureReview: '2. Literature Review',
+  methodology: '3. Methodology',
+  results: '4. Results',
+  discussion: '5. Discussion',
+  conclusion: '6. Conclusion',
+  references: 'References',
+};
+
+function slugify(text: string): string {
+    return text.toString().toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[^\w-]+/g, '')
+        .replace(/--+/g, '-')
+        .replace(/^-+/, '')
+        .replace(/-+$/, '')
+        .substring(0, 50);
+}
+
+// --- PDF Generation ---
+export function generatePdf(paper: ResearchPaper) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({
+    orientation: 'p',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 20;
+  let y = margin;
+
+  const addText = (text: string, size: number, isBold: boolean, x: number, startY: number) => {
+    doc.setFontSize(size);
+    doc.setFont(undefined, isBold ? 'bold' : 'normal');
+    const splitText = doc.splitTextToSize(text, pageWidth - margin * 2);
+    
+    if (startY + (splitText.length * (size / 2.5)) > pageHeight - margin) {
+        doc.addPage();
+        startY = margin;
+    }
+    doc.text(splitText, x, startY);
+    return startY + (splitText.length * (size / 2.5)) + (isBold ? 5 : 3);
+  };
+
+  y = addText(paper.title, 18, true, pageWidth / 2, y);
+  doc.textAlign(paper.title, {align: 'center'}, pageWidth / 2, y - (doc.splitTextToSize(paper.title, pageWidth - margin*2).length * (18 / 2.5)));
+  y += 5;
+
+
+  const sections: PaperSection[] = ['abstract', 'introduction', 'literatureReview', 'methodology', 'results', 'discussion', 'conclusion'];
+
+  for (const section of sections) {
+    y = addText(SECTION_TITLES[section], 14, true, margin, y);
+    y = addText(paper[section] as string, 11, false, margin, y);
+    y += 4;
+  }
+  
+  y = addText(SECTION_TITLES.references, 14, true, margin, y);
+  paper.references.forEach(ref => {
+     y = addText(ref, 10, false, margin, y);
+     y -= 1; // tighter spacing for references
+  });
+
+  doc.save(`${slugify(paper.title)}.pdf`);
+}
+
+
+// --- DOCX Generation ---
+export async function generateDocx(paper: ResearchPaper) {
+    const { Document, Packer, Paragraph, TextRun, HeadingLevel } = window.docx;
+
+    const createSection = (title: string, text: string) => [
+        new Paragraph({ text: title, heading: HeadingLevel.HEADING_1, spacing: { before: 400, after: 200 } }),
+        new Paragraph({ 
+            children: text.split('\n').map(line => new TextRun({ text: line, break: 1 })),
+            spacing: { after: 100 }
+        })
+    ];
+
+    const doc = new Document({
+        creator: "AI Research Paper Generator",
+        title: paper.title,
+        description: `Research paper on ${paper.title}`,
+        sections: [{
+            children: [
+                new Paragraph({ text: paper.title, heading: HeadingLevel.TITLE }),
+                ...createSection(SECTION_TITLES.abstract, paper.abstract),
+                ...createSection(SECTION_TITLES.introduction, paper.introduction),
+                ...createSection(SECTION_TITLES.literatureReview, paper.literatureReview),
+                ...createSection(SECTION_TITLES.methodology, paper.methodology),
+                ...createSection(SECTION_TITLES.results, paper.results),
+                ...createSection(SECTION_TITLES.discussion, paper.discussion),
+                ...createSection(SECTION_TITLES.conclusion, paper.conclusion),
+                new Paragraph({ text: SECTION_TITLES.references, heading: HeadingLevel.HEADING_1, spacing: { before: 400, after: 200 } }),
+                ...paper.references.map(ref => new Paragraph({ text: ref, style: "ListParagraph" })),
+            ],
+        }],
+    });
+
+    const blob = await Packer.toBlob(doc);
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${slugify(paper.title)}.docx`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+
+// --- LaTeX Generation ---
+const escapeLatex = (str: string): string => {
+  return str
+    .replace(/\\/g, '\\textbackslash{}')
+    .replace(/([&%$#_{}])/g, '\\$1')
+    .replace(/~/g, '\\textasciitilde{}')
+    .replace(/\^/g, '\\textasciicaret{}');
+};
+
+export function generateTex(paper: ResearchPaper) {
+    const texContent = `
+\\documentclass[12pt, a4paper]{article}
+\\usepackage[utf8]{inputenc}
+\\usepackage{amsmath}
+\\usepackage{amsfonts}
+\\usepackage{amssymb}
+\\usepackage{graphicx}
+\\usepackage[left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm]{geometry}
+\\usepackage{times}
+\\usepackage{hyperref}
+
+\\title{${escapeLatex(paper.title)}}
+\\author{Generated by AI}
+\\date{\\today}
+
+\\begin{document}
+\\maketitle
+
+\\begin{abstract}
+${escapeLatex(paper.abstract)}
+\\end{abstract}
+
+\\section{Introduction}
+${escapeLatex(paper.introduction)}
+
+\\section{Literature Review}
+${escapeLatex(paper.literatureReview)}
+
+\\section{Methodology}
+${escapeLatex(paper.methodology)}
+
+\\section{Results}
+${escapeLatex(paper.results)}
+
+\\section{Discussion}
+${escapeLatex(paper.discussion)}
+
+\\section{Conclusion}
+${escapeLatex(paper.conclusion)}
+
+\\section*{References}
+\\begin{itemize}
+${paper.references.map(ref => `  \\item ${escapeLatex(ref)}`).join('\n')}
+\\end{itemize}
+
+\\end{document}
+    `;
+
+    const blob = new Blob([texContent.trim()], { type: 'text/plain;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${slugify(paper.title)}.tex`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}

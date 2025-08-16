@@ -1,0 +1,5 @@
+{
+  "name": "AI Research Paper Generator",
+  "description": "A web application that uses the Gemini API to generate a complete, detailed research paper on any given topic. Users can download the final paper in PDF, Word (.docx), and LaTeX formats.",
+  "requestFramePermissions": []
+}
